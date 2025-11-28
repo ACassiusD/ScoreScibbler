@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "ScoreScribble",
+  "version": "0.1",
+  "description": "Draw on scrolling music scores in your browser.",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["*://musescore.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "scorescribble@example.com",
+      "strict_min_version": "109.0"
+    }
+  }
+}
+
+

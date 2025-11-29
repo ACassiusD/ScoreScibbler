@@ -33,10 +33,53 @@
 
     const ctx = canvas.getContext("2d");
 
+    // --- Eraser cursor indicator ---
+    let eraserSize = 20; // px (visual + lineWidth)
+    const penSize = 2;
+    const minEraserSize = 5;
+    const maxEraserSize = 100;
+
+    const eraserCursor = document.createElement("div");
+    Object.assign(eraserCursor.style, {
+      position: "fixed",
+      width: eraserSize + "px",
+      height: eraserSize + "px",
+      borderRadius: "50%",
+      border: "2px solid red",
+      boxSizing: "border-box",
+      pointerEvents: "none",
+      zIndex: "10001",
+      display: "none",
+    });
+    document.body.appendChild(eraserCursor);
+
+    function updateEraserCursorFromEvent(e) {
+      if (!e || !e.clientX) return;
+      const x = e.clientX - eraserSize / 2;
+      const y = e.clientY - eraserSize / 2;
+      eraserCursor.style.left = x + "px";
+      eraserCursor.style.top = y + "px";
+      eraserCursor.style.display = "block";
+    }
+
+    function hideEraserCursor() {
+      eraserCursor.style.display = "none";
+    }
+
     function resizeCanvas() {
       const dpr = window.devicePixelRatio || 1;
       const width = scroller.clientWidth;
       const height = scroller.scrollHeight; // all pages
+
+      // Backup current drawing
+      let backup = null;
+      if (canvas.width && canvas.height) {
+        backup = document.createElement("canvas");
+        backup.width = canvas.width;
+        backup.height = canvas.height;
+        const bctx = backup.getContext("2d");
+        bctx.drawImage(canvas, 0, 0);
+      }
 
       canvas.style.width = width + "px";
       canvas.style.height = height + "px";
@@ -44,14 +87,41 @@
       canvas.width = width * dpr;
       canvas.height = height * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Restore drawing (scaled to new CSS size)
+      if (backup) {
+        ctx.drawImage(backup, 0, 0, width, height);
+      }
     }
 
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
+    // React when MuseScore resizes the score area (e.g. sidebar toggle)
+    if (window.ResizeObserver) {
+      const ro = new ResizeObserver(() => {
+        resizeCanvas();
+      });
+      ro.observe(scroller);
+    } else {
+      // Fallback: poll size
+      let lastWidth = scroller.clientWidth;
+      let lastHeight = scroller.scrollHeight;
+      setInterval(() => {
+        const w = scroller.clientWidth;
+        const h = scroller.scrollHeight;
+        if (w !== lastWidth || h !== lastHeight) {
+          lastWidth = w;
+          lastHeight = h;
+          resizeCanvas();
+        }
+      }, 500);
+    }
+
     // --- Header bar at top of page ---
     let scribbleEnabled = true;
     let headerCollapsed = false;
+    let drawMode = "pen"; // "pen" | "eraser"
 
     const header = document.createElement("div");
     header.id = "scorescribble-header";
@@ -69,10 +139,10 @@
       padding: "2px 8px",
       fontSize: "12px",
       fontFamily: "system-ui, sans-serif",
-      background: "rgba(255,255,255,0.95)",
-      borderBottom: "1px solid #ccc",
-      boxShadow: "0 1px 2px rgba(0,0,0,0.15)",
-      color: "#333",
+      background: "rgba(26, 26, 26, 0.95)",
+      borderBottom: "1px solid #444",
+      boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
+      color: "#e0e0e0",
       pointerEvents: "auto",
     });
 
@@ -81,32 +151,121 @@
     title.style.fontWeight = "600";
 
     const minBtn = document.createElement("button");
-    minBtn.textContent = "–";
+    minBtn.textContent = "↓";
     Object.assign(minBtn.style, {
-      border: "1px solid #ccc",
-      background: "#f5f5f5",
+      border: "1px solid #555",
+      background: "#333",
       borderRadius: "3px",
       padding: "0 6px",
       cursor: "pointer",
       fontSize: "12px",
+      marginLeft: "auto",
+      color: "#e0e0e0",
     });
 
-    const toggleBtn = document.createElement("button");
+    const toggleBtn = document.createElement("button"); // Start/Stop scribbling
     Object.assign(toggleBtn.style, {
-      border: "1px solid #ccc",
-      background: "#fff",
+      border: "1px solid #555",
+      background: "#333",
       borderRadius: "3px",
       padding: "0 8px",
       cursor: "pointer",
       fontSize: "12px",
+      color: "#e0e0e0",
     });
 
+    const eraserBtn = document.createElement("button");
+    eraserBtn.textContent = "Eraser";
+    Object.assign(eraserBtn.style, {
+      border: "1px solid #555",
+      background: "#333",
+      borderRadius: "3px",
+      padding: "0 8px",
+      cursor: "pointer",
+      fontSize: "12px",
+      color: "#e0e0e0",
+    });
+
+    const clearBtn = document.createElement("button");
+    clearBtn.textContent = "Clear scribble";
+    Object.assign(clearBtn.style, {
+      border: "1px solid #cc4444",
+      background: "#5a2a2a",
+      borderRadius: "3px",
+      padding: "0 8px",
+      cursor: "pointer",
+      fontSize: "12px",
+      color: "#ff9999",
+    });
+
+    const eraserLabel = document.createElement("span");
+    eraserLabel.textContent = `Eraser: ${eraserSize}px`;
+    eraserLabel.style.opacity = "0.8";
+    eraserLabel.style.color = "#b0b0b0";
+
+    const eraserSizeDownBtn = document.createElement("button");
+    eraserSizeDownBtn.textContent = "−";
+    Object.assign(eraserSizeDownBtn.style, {
+      border: "1px solid #555",
+      background: "#333",
+      borderRadius: "3px",
+      padding: "0 6px",
+      cursor: "pointer",
+      fontSize: "14px",
+      lineHeight: "1",
+      width: "20px",
+      color: "#e0e0e0",
+    });
+
+    const eraserSizeUpBtn = document.createElement("button");
+    eraserSizeUpBtn.textContent = "+";
+    Object.assign(eraserSizeUpBtn.style, {
+      border: "1px solid #555",
+      background: "#333",
+      borderRadius: "3px",
+      padding: "0 6px",
+      cursor: "pointer",
+      fontSize: "14px",
+      lineHeight: "1",
+      width: "20px",
+      color: "#e0e0e0",
+    });
+
+    function updateEraserSize(newSize) {
+      eraserSize = Math.max(minEraserSize, Math.min(maxEraserSize, newSize));
+      eraserLabel.textContent = `Eraser: ${eraserSize}px`;
+      eraserCursor.style.width = eraserSize + "px";
+      eraserCursor.style.height = eraserSize + "px";
+    }
+
     function updateModeUI() {
+      // scribble on/off
       toggleBtn.textContent = scribbleEnabled
         ? "Stop scribbling"
         : "Start scribbling";
-      canvas.style.pointerEvents = scribbleEnabled ? "auto" : "none";
-      canvas.style.cursor = scribbleEnabled ? "crosshair" : "default";
+
+      if (!scribbleEnabled) {
+        canvas.style.pointerEvents = "none";
+        canvas.style.cursor = "default";
+        hideEraserCursor();
+      } else {
+        canvas.style.pointerEvents = "auto";
+        if (drawMode === "eraser") {
+          canvas.style.cursor = "none";
+        } else {
+          canvas.style.cursor = "crosshair";
+          hideEraserCursor();
+        }
+      }
+
+      // eraser button visual state
+      if (drawMode === "eraser") {
+        eraserBtn.style.background = "#5a2a2a";
+        eraserBtn.style.borderColor = "#cc4444";
+      } else {
+        eraserBtn.style.background = "#333";
+        eraserBtn.style.borderColor = "#555";
+      }
     }
 
     function updateHeaderUI() {
@@ -115,13 +274,25 @@
         header.style.padding = "0 6px";
         title.style.display = "none";
         toggleBtn.style.display = "none";
-        minBtn.textContent = "+";
+        eraserBtn.style.display = "none";
+        clearBtn.style.display = "none";
+        eraserLabel.style.display = "none";
+        eraserSizeDownBtn.style.display = "none";
+        eraserSizeUpBtn.style.display = "none";
+        minBtn.textContent = "↑";
+        document.body.style.paddingTop = "16px";
       } else {
         header.style.height = "26px";
         header.style.padding = "2px 8px";
         title.style.display = "inline";
         toggleBtn.style.display = "inline-block";
-        minBtn.textContent = "–";
+        eraserBtn.style.display = "inline-block";
+        clearBtn.style.display = "inline-block";
+        eraserLabel.style.display = "inline";
+        eraserSizeDownBtn.style.display = "inline-block";
+        eraserSizeUpBtn.style.display = "inline-block";
+        minBtn.textContent = "↓";
+        document.body.style.paddingTop = "26px";
       }
     }
 
@@ -135,13 +306,37 @@
       updateModeUI();
     });
 
+    eraserBtn.addEventListener("click", () => {
+      drawMode = drawMode === "eraser" ? "pen" : "eraser";
+      updateModeUI();
+    });
+
+    clearBtn.addEventListener("click", () => {
+      if (confirm("Are you sure you want to clear all scribble?")) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    });
+
+    eraserSizeDownBtn.addEventListener("click", () => {
+      updateEraserSize(eraserSize - 5);
+    });
+
+    eraserSizeUpBtn.addEventListener("click", () => {
+      updateEraserSize(eraserSize + 5);
+    });
+
     header.appendChild(title);
     header.appendChild(toggleBtn);
+    header.appendChild(eraserBtn);
+    header.appendChild(clearBtn);
+    header.appendChild(eraserSizeDownBtn);
+    header.appendChild(eraserLabel);
+    header.appendChild(eraserSizeUpBtn);
     header.appendChild(minBtn);
     document.body.appendChild(header);
 
     updateModeUI();
-    updateHeaderUI();
+    updateHeaderUI(); // This will set the initial body padding
 
     // --- Drawing logic ---
     let drawing = false;
@@ -155,27 +350,40 @@
       return {
         x: clientX - rect.left,
         y: clientY - rect.top,
+        clientX,
+        clientY,
       };
     }
 
     function startDraw(e) {
       if (!scribbleEnabled) return;
       e.preventDefault();
+      const { x, y, clientX, clientY } = getPos(e);
       drawing = true;
-      const { x, y } = getPos(e);
       lastX = x;
       lastY = y;
+
+      if (scribbleEnabled && drawMode === "eraser" && clientX && clientY) {
+        updateEraserCursorFromEvent({ clientX, clientY });
+      }
     }
 
     function draw(e) {
       if (!drawing || !scribbleEnabled) return;
       e.preventDefault();
-      const { x, y } = getPos(e);
+      const { x, y, clientX, clientY } = getPos(e);
 
-      ctx.lineWidth = 2;
+      if (drawMode === "eraser") {
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.lineWidth = eraserSize;
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.lineWidth = penSize;
+        ctx.strokeStyle = "red";
+      }
+
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
-      ctx.strokeStyle = "red";
 
       ctx.beginPath();
       ctx.moveTo(lastX, lastY);
@@ -184,14 +392,33 @@
 
       lastX = x;
       lastY = y;
+
+      if (scribbleEnabled && drawMode === "eraser" && clientX && clientY) {
+        updateEraserCursorFromEvent({ clientX, clientY });
+      }
     }
 
     function endDraw() {
       drawing = false;
+      if (drawMode === "eraser") {
+        hideEraserCursor();
+      }
+    }
+
+    function handleMouseMove(e) {
+      if (!scribbleEnabled) {
+        hideEraserCursor();
+        return;
+      }
+      if (!drawing && drawMode === "eraser") {
+        // show indicator while hovering
+        updateEraserCursorFromEvent(e);
+      }
+      draw(e);
     }
 
     canvas.addEventListener("mousedown", startDraw);
-    canvas.addEventListener("mousemove", draw);
+    canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseup", endDraw);
     canvas.addEventListener("mouseleave", endDraw);
 
@@ -200,10 +427,10 @@
     canvas.addEventListener("touchend", endDraw, { passive: false });
   }
 
-  // Try immediately (in case the element is already there)
+  // Try immediately
   initIfReady();
 
-  // Watch DOM mutations for when MuseScore injects the scroller
+  // Watch DOM for scroller creation
   const observer = new MutationObserver(() => {
     if (initialized) {
       observer.disconnect();
@@ -217,6 +444,6 @@
     subtree: true,
   });
 
-  // Also try on window load as a fallback
+  // Fallback
   window.addEventListener("load", initIfReady);
 })();

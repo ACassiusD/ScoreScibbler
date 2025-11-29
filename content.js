@@ -713,6 +713,24 @@
     let lastY = 0;
     let currentStroke = null; // for smooth pen
 
+    function drawRoundedEnd(x, y) {
+      ctx.save();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = penColor;
+      ctx.beginPath();
+      ctx.arc(x, y, penSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawStrokeTips(points) {
+      if (!points || points.length < 2) return;
+
+      // Only draw the end circle (start circle is drawn immediately in startDraw)
+      const pn = points[points.length - 1];
+      drawRoundedEnd(pn.x, pn.y);
+    }
+
     function getPos(e) {
       const rect = canvas.getBoundingClientRect();
       const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -746,6 +764,8 @@
       if (drawMode === "pen") {
         // start a new smooth stroke
         currentStroke = [{ x, y }];
+        // Draw the start circle immediately
+        drawRoundedEnd(x, y);
       } else {
         currentStroke = null; // eraser doesn't use smoothing
       }
@@ -808,6 +828,10 @@
     }
 
     function endDraw() {
+      if (drawMode === "pen" && currentStroke && currentStroke.length > 1) {
+        drawStrokeTips(currentStroke);
+      }
+
       drawing = false;
       currentStroke = null;
       if (drawMode === "eraser") {
